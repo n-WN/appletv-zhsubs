@@ -58,6 +58,14 @@ FFMPEG = "ffmpeg"
 SUBTITLE_ENCODINGS = ("UTF-8", "GB18030")
 MIN_PLAYLIST_DURATION = 14400
 PLAYLIST_MARGIN = 3600
+
+# Media-playlist pre-warming: play-edge builds each playlist slowly on first
+# touch, so the addon completes one fetch per representative playlist through
+# the egress before the player asks. See warmer.py for the full story.
+WARM_TTL_SECONDS = 1200.0
+WARM_TIMEOUT = 90.0
+WARM_VIDEO_PER_PATHWAY = 2
+WARM_MAX_URLS = 12
 DEFAULT_FETCH_TITLE = "The Wolf of Wall Street"
 DEFAULT_FETCH_YEAR = "2013"
 DEFAULT_FETCH_UMC = "umc.cmc.2tmr7hr6xnw1buspmujtvb9ep"

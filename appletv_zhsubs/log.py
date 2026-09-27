@@ -20,6 +20,9 @@ type AuditEvent = Literal[
     "inject",
     "inject_skip",
     "inject_fail",
+    "warm",
+    "warm_done",
+    "warm_fail",
 ]
 
 

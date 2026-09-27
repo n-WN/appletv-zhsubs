@@ -43,8 +43,16 @@ One Mac (or any always-on host) on the LAN serves every device.
   serve time. Fix sync without touching the converted files.
 - **Region pinning.** Rewrites the configuration API response so the player
   accepts the injected tracks (storefront `143464`, SG, by default).
+- **Media-playlist pre-warming.** play-edge builds each variant/audio media
+  playlist slowly on first touch (~20 kB/s cold), and AVPlayer abandons the
+  feature before it starts while the warm-CDN interstitial still plays —
+  the "ads play, movie does not" failure. The addon completes one fetch per
+  representative playlist (per CDN pathway: opening video rungs + default
+  audio) through the egress as soon as a master passes by; Apple's cache is
+  keyed by asset, not by signed token, so one warm pass speeds up every
+  later session.
 - **Observable.** Audit log for every rewrite, `/inj-selftest/` endpoint to
-  verify injection end to end, and 106 unit tests for the pipeline.
+  verify injection end to end, and 119 unit tests for the pipeline.
 
 ## How it works
 
@@ -96,7 +104,7 @@ leaf certificate chains to the same mitmproxy CA the device already trusts).
 | `appletv_zhsubs/vtt.py` | WebVTT parsing, duration, cue shifting |
 | `appletv_zhsubs/registry.py` | UMC → subtitle-set registry with offsets |
 | `appletv_zhsubs/config.py` | All ports, paths, and fixed values in one place |
-| `tests/` | 106 unit tests, no network, no subprocess |
+| `tests/` | 119 unit tests, no network, no subprocess |
 
 ## Deployment
 
@@ -218,7 +226,7 @@ python3 -m appletv_zhsubs.fetcher "Title" 2013 umc.cmc.xxxx
 ## Development
 
 ```sh
-python3 -m unittest discover -s tests   # 106 tests, offline, loopback only
+python3 -m unittest discover -s tests   # 119 tests, offline, loopback only
 ruff check .
 ```
 

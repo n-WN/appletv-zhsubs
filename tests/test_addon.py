@@ -37,6 +37,7 @@ from appletv_zhsubs.fetcher import SubHDFetcher
 from appletv_zhsubs.hls import inject_subs
 from appletv_zhsubs.log import AuditLogger
 from appletv_zhsubs.registry import Registry
+from appletv_zhsubs.warmer import PlaylistWarmer
 
 
 class AddonTests(ScratchTestCase):
@@ -45,11 +46,13 @@ class AddonTests(ScratchTestCase):
         self.registry = Registry(self.scratch / "registry.json")
         self.fetcher = Mock(spec=SubHDFetcher)
         self.logger = Mock(spec=AuditLogger)
+        self.warmer = Mock(spec=PlaylistWarmer)
         self.addon = AppleTVZhSubs(
             self.registry,
             self.fetcher,
             self.logger,
             self.scratch / "masters",
+            self.warmer,
         )
 
     def flow(

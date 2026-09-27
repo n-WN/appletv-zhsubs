@@ -31,6 +31,7 @@ from .fetcher import SubHDFetcher
 from .hls import inject_subs, present_zh
 from .log import AuditLogger
 from .registry import Registry, RegistryEntry
+from .warmer import PlaylistWarmer
 
 
 @dataclass(frozen=True, slots=True)
@@ -166,6 +167,7 @@ class AppleTVZhSubs:
         fetcher: SubHDFetcher | None = None,
         logger: AuditLogger | None = None,
         master_dir: Path = MASTER_DUMP_DIR,
+        warmer: PlaylistWarmer | None = None,
     ) -> None:
         self.registry = registry if registry is not None else Registry()
         self.fetcher = (
@@ -173,6 +175,9 @@ class AppleTVZhSubs:
         )
         self.logger = logger if logger is not None else AuditLogger()
         self.master_dir = master_dir
+        self.warmer = (
+            warmer if warmer is not None else PlaylistWarmer(logger=self.logger)
+        )
         self.current: CurrentMovie | None = None
         self.lock = threading.Lock()
 
@@ -335,6 +340,10 @@ class AppleTVZhSubs:
             )
         except OSError:
             pass
+        # Warm cold media playlists for every real master — including titles
+        # that need no subtitle injection — so the feature can start.
+        if path != SELFTEST_PATH:
+            self.warmer.warm_async(text, flow.request.pretty_url)
         with self.lock:
             current = self.current
         if current is None and path == SELFTEST_PATH:
