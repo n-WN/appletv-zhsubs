@@ -3,7 +3,7 @@
 import re
 from collections.abc import Collection
 
-from .config import LANGUAGE_NAMES, LANGUAGES, SUB_BASE
+from .config import LANGUAGE_NAMES, LANGUAGE_TAGS, LANGUAGES, SUB_BASE
 
 
 def _norm_zh(language: str) -> str | None:
@@ -70,7 +70,7 @@ def inject_subs(
         ]
     renditions = [
         f'#EXT-X-MEDIA:TYPE=SUBTITLES,GROUP-ID="{group_id}",'
-        f'NAME="{LANGUAGE_NAMES[lang]}",LANGUAGE="{lang}",AUTOSELECT=YES,'
+        f'NAME="{LANGUAGE_NAMES[lang]}",LANGUAGE="{LANGUAGE_TAGS[lang]}",AUTOSELECT=YES,'
         f'DEFAULT=NO,FORCED=NO,URI="{sub_base}/{key}/{lang}.m3u8"'
         for lang in LANGUAGES
         if lang in langs and lang not in present

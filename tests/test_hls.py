@@ -27,8 +27,8 @@ low.m3u8
 EXPECTED_WITH_GROUP = """#EXTM3U
 #EXT-X-VERSION:6
 #EXT-X-MEDIA:TYPE=SUBTITLES,GROUP-ID="subs",NAME="English",LANGUAGE="en",URI="en.m3u8"
-#EXT-X-MEDIA:TYPE=SUBTITLES,GROUP-ID="subs",NAME="简体中文",LANGUAGE="zh-Hans",AUTOSELECT=YES,DEFAULT=NO,FORCED=NO,URI="https://127.0.0.1:17897/s/wolf2013/zh-Hans.m3u8"
-#EXT-X-MEDIA:TYPE=SUBTITLES,GROUP-ID="subs",NAME="繁體中文",LANGUAGE="zh-Hant",AUTOSELECT=YES,DEFAULT=NO,FORCED=NO,URI="https://127.0.0.1:17897/s/wolf2013/zh-Hant.m3u8"
+#EXT-X-MEDIA:TYPE=SUBTITLES,GROUP-ID="subs",NAME="简体中文（社区）",LANGUAGE="zh-Hans-x-comm",AUTOSELECT=YES,DEFAULT=NO,FORCED=NO,URI="https://127.0.0.1:17897/s/wolf2013/zh-Hans.m3u8"
+#EXT-X-MEDIA:TYPE=SUBTITLES,GROUP-ID="subs",NAME="繁體中文（社區）",LANGUAGE="zh-Hant-x-comm",AUTOSELECT=YES,DEFAULT=NO,FORCED=NO,URI="https://127.0.0.1:17897/s/wolf2013/zh-Hant.m3u8"
 #EXT-X-STREAM-INF:BANDWIDTH=5000000,SUBTITLES="subs"
 high.m3u8
 #EXT-X-STREAM-INF:BANDWIDTH=1000000,SUBTITLES="subs"
@@ -37,8 +37,8 @@ low.m3u8
 
 EXPECTED_WITHOUT_GROUP = """#EXTM3U
 #EXT-X-VERSION:3
-#EXT-X-MEDIA:TYPE=SUBTITLES,GROUP-ID="inj-subs",NAME="简体中文",LANGUAGE="zh-Hans",AUTOSELECT=YES,DEFAULT=NO,FORCED=NO,URI="https://127.0.0.1:17897/s/wolf2013/zh-Hans.m3u8"
-#EXT-X-MEDIA:TYPE=SUBTITLES,GROUP-ID="inj-subs",NAME="繁體中文",LANGUAGE="zh-Hant",AUTOSELECT=YES,DEFAULT=NO,FORCED=NO,URI="https://127.0.0.1:17897/s/wolf2013/zh-Hant.m3u8"
+#EXT-X-MEDIA:TYPE=SUBTITLES,GROUP-ID="inj-subs",NAME="简体中文（社区）",LANGUAGE="zh-Hans-x-comm",AUTOSELECT=YES,DEFAULT=NO,FORCED=NO,URI="https://127.0.0.1:17897/s/wolf2013/zh-Hans.m3u8"
+#EXT-X-MEDIA:TYPE=SUBTITLES,GROUP-ID="inj-subs",NAME="繁體中文（社區）",LANGUAGE="zh-Hant-x-comm",AUTOSELECT=YES,DEFAULT=NO,FORCED=NO,URI="https://127.0.0.1:17897/s/wolf2013/zh-Hant.m3u8"
 #EXT-X-STREAM-INF:BANDWIDTH=5000000,SUBTITLES="inj-subs"
 high.m3u8
 #EXT-X-STREAM-INF:BANDWIDTH=1000000,SUBTITLES="inj-subs"
@@ -141,8 +141,8 @@ class InjectionTests(unittest.TestCase):
             'BANDWIDTH=1000000,SUBTITLES="subs"', 'BANDWIDTH=1000000,SUBTITLES="other"'
         )
         result = inject_subs(text, "key", ["zh-Hans"])
-        self.assertIn('NAME="简体中文"', result)
-        self.assertIn('GROUP-ID="subs",NAME="简体中文"', result)
+        self.assertIn('NAME="简体中文（社区）"', result)
+        self.assertIn('GROUP-ID="subs",NAME="简体中文（社区）"', result)
         self.assertIn('BANDWIDTH=1000000,SUBTITLES="other"', result)
 
     def test_missing_first_group_updates_every_variant_as_before(self) -> None:
@@ -187,8 +187,8 @@ class InjectionTests(unittest.TestCase):
             '#EXT-X-STREAM-INF:BANDWIDTH=5000000,SUBTITLES="subs"\nhigh.m3u8\n'
         )
         result = inject_subs(master, "key", ["zh-Hans", "zh-Hant"])
-        self.assertNotIn('LANGUAGE="zh-Hans"', result)
-        self.assertEqual(result.count('LANGUAGE="zh-Hant"'), 1)
+        self.assertNotIn('LANGUAGE="zh-Hans-x-comm"', result)
+        self.assertEqual(result.count('LANGUAGE="zh-Hant-x-comm"'), 1)
 
     def test_cantonese_traditional_does_not_block_mandarin(self) -> None:
         master = (
@@ -198,8 +198,8 @@ class InjectionTests(unittest.TestCase):
             '#EXT-X-STREAM-INF:BANDWIDTH=5000000,SUBTITLES="subs"\nhigh.m3u8\n'
         )
         result = inject_subs(master, "key", ["zh-Hans", "zh-Hant"])
-        self.assertIn('LANGUAGE="zh-Hans"', result)
-        self.assertIn('LANGUAGE="zh-Hant"', result)
+        self.assertIn('LANGUAGE="zh-Hans-x-comm"', result)
+        self.assertIn('LANGUAGE="zh-Hant-x-comm"', result)
 
     def test_present_zh_normalizes_apple_spellings(self) -> None:
         master = (

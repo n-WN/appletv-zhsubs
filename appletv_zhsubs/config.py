@@ -32,7 +32,13 @@ PLAYEDGE_HOST = "play-edge.itunes.apple.com"
 CONFIGURATION_PATH = "/uts/v3/configurations"
 SELFTEST_PATH = "/inj-selftest/master.m3u8"
 LANGUAGES = ("zh-Hans", "zh-Hant")
-LANGUAGE_NAMES = {"zh-Hans": "简体中文", "zh-Hant": "繁體中文"}
+LANGUAGE_NAMES = {"zh-Hans": "简体中文（社区）", "zh-Hant": "繁體中文（社區）"}
+# Apple players ignore NAME and render the system-localized name of the
+# LANGUAGE tag instead, so provenance has to ride in the tag itself. The
+# private-use subtag shows up as "Chinese, Simplified (Private-Use: comm)"
+# (verified with AVFoundation), while plain zh-Hans stays indistinguishable
+# from an official cmn-Hans track. URIs keep the plain ids.
+LANGUAGE_TAGS = {"zh-Hans": "zh-Hans-x-comm", "zh-Hant": "zh-Hant-x-comm"}
 HLS_CONTENT_TYPE = "application/vnd.apple.mpegurl"
 VTT_CONTENT_TYPE = "text/vtt; charset=utf-8"
 BIPBOP_VARIANT_URL = (
@@ -61,8 +67,8 @@ TEST_MASTER = f"""#EXTM3U
 #EXT-X-INDEPENDENT-SEGMENTS
 #EXT-X-MEDIA:TYPE=AUDIO,GROUP-ID="aud",NAME="English",LANGUAGE="en",URI="a.m3u8"
 #EXT-X-MEDIA:TYPE=SUBTITLES,GROUP-ID="subs",NAME="English CC",LANGUAGE="en",AUTOSELECT=YES,DEFAULT=NO,FORCED=NO,URI="{SUB_BASE}/wolf2013/en.m3u8"
-#EXT-X-MEDIA:TYPE=SUBTITLES,GROUP-ID="subs",NAME="简体中文",LANGUAGE="zh-Hans",AUTOSELECT=YES,DEFAULT=NO,FORCED=NO,URI="{SUB_BASE}/wolf2013/zh-Hans.m3u8"
-#EXT-X-MEDIA:TYPE=SUBTITLES,GROUP-ID="subs",NAME="繁體中文",LANGUAGE="zh-Hant",AUTOSELECT=YES,DEFAULT=NO,FORCED=NO,URI="{SUB_BASE}/wolf2013/zh-Hant.m3u8"
+#EXT-X-MEDIA:TYPE=SUBTITLES,GROUP-ID="subs",NAME="简体中文（社区）",LANGUAGE="zh-Hans-x-comm",AUTOSELECT=YES,DEFAULT=NO,FORCED=NO,URI="{SUB_BASE}/wolf2013/zh-Hans.m3u8"
+#EXT-X-MEDIA:TYPE=SUBTITLES,GROUP-ID="subs",NAME="繁體中文（社區）",LANGUAGE="zh-Hant-x-comm",AUTOSELECT=YES,DEFAULT=NO,FORCED=NO,URI="{SUB_BASE}/wolf2013/zh-Hant.m3u8"
 #EXT-X-STREAM-INF:BANDWIDTH=5000000,RESOLUTION=1920x1080,AUDIO="aud",SUBTITLES="subs"
 {BIPBOP_VARIANT_URL}
 """
