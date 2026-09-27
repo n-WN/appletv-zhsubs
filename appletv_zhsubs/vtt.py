@@ -66,7 +66,10 @@ def shift_vtt(text: str, offset_seconds: float = 0.0) -> str:
         else:
             if block_line == 0:
                 ignored = content in (
-                    "WEBVTT", "NOTE", "STYLE", "REGION",
+                    "WEBVTT",
+                    "NOTE",
+                    "STYLE",
+                    "REGION",
                 ) or content.startswith(("WEBVTT ", "WEBVTT\t", "NOTE ", "NOTE\t"))
             # A cue timing line follows either a blank line or one cue ID.
             if not ignored and block_line < 2:

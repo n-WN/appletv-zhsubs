@@ -19,6 +19,8 @@ class RegistryEntry(TypedDict):
     key: str
     title: NotRequired[str]
     year: NotRequired[int | str | None]
+    season: NotRequired[int | None]
+    episode: NotRequired[int | None]
     langs: NotRequired[list[str]]
     offset_seconds: NotRequired[float]
 

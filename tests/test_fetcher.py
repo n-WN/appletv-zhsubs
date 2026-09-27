@@ -215,6 +215,56 @@ class FetchTests(ScratchTestCase):
             self.fetcher.fetch_for("中文", None, "umc.movie")["key"], "movie"
         )
 
+    def test_episode_key_carries_the_slot(self) -> None:
+        (self.scratch / "hijack2023s01e01.zh-Hans.vtt").write_bytes(b"WEBVTT\n")
+        entry = self.fetcher.fetch_for("Hijack", 2023, "umc.show", season=1, episode=1)
+        self.assertEqual(entry["key"], "hijack2023s01e01")
+        self.assertEqual(entry["season"], 1)
+        self.assertEqual(entry["episode"], 1)
+        self.factory.assert_not_called()
+
+    def test_episode_registry_hit_requires_the_same_slot(self) -> None:
+        self.registry.save(
+            {
+                "umc.show": {
+                    "key": "hijacks01e01",
+                    "langs": ["zh-Hans"],
+                    "season": 1,
+                    "episode": 1,
+                }
+            }
+        )
+        same = self.fetcher.fetch_for("Hijack", 2023, "umc.show", season=1, episode=1)
+        self.assertEqual(same["key"], "hijacks01e01")
+        self.factory.assert_not_called()
+
+        # Another episode of the same show must not reuse the S01E01 entry.
+        self.client.search.return_value = []
+        with self.assertRaises(RuntimeError):
+            self.fetcher.fetch_for("Hijack", 2023, "umc.show", season=1, episode=2)
+        self.factory.assert_called()
+
+    def test_episode_search_leads_with_the_slot_tag(self) -> None:
+        self.client.search.return_value = []
+        with self.assertRaises(RuntimeError):
+            self.fetcher.fetch_for("Hijack", 2023, "umc.show", season=2, episode=5)
+        self.assertEqual(self.client.search.call_args_list[0].args[0], "Hijack S02E05")
+
+    def test_pick_score_prefers_the_exact_episode(self) -> None:
+        base = {"sid": "id", "langs": ["zh-Hans"], "official": False, "is_srt": False}
+        right = _pick_score(base | {"release": "Hijack.2023.S01E01.WEB-DL"}, 2023, 1, 1)
+        wrong = _pick_score(base | {"release": "Hijack.2023.S01E02.WEB-DL"}, 2023, 1, 1)
+        plain = _pick_score(base | {"release": "Hijack 2023 WEB-DL"}, 2023, 1, 1)
+        self.assertGreater(right, plain)
+        self.assertGreater(plain, wrong)
+        # Movie calls are unchanged without a slot.
+        self.assertEqual(
+            _pick_score(base | {"release": "Hijack.2023.S01E02.WEB-DL"}, 2023),
+            _pick_score(
+                base | {"release": "Hijack.2023.S01E02.WEB-DL"}, 2023, None, None
+            ),
+        )
+
     def test_full_pipeline_fallback_ranking_archive_and_offset_merge(self) -> None:
         self.registry.save({"umc.movie": {"key": "movie2013", "offset_seconds": -0.5}})
         self.client.search.side_effect = [

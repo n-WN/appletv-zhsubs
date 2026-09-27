@@ -4,7 +4,7 @@ import ast
 import unittest
 
 from appletv_zhsubs.config import SUB_BASE, TEST_MASTER
-from appletv_zhsubs.hls import build_vtt_playlist, inject_subs
+from appletv_zhsubs.hls import build_vtt_playlist, inject_subs, present_zh
 from tests.support import LIVE_DIR, original_function
 
 WITH_GROUP = """#EXTM3U
@@ -164,11 +164,58 @@ class InjectionTests(unittest.TestCase):
         )
         self.assertIn('URI="https://example.test/s//key/zh-Hans.m3u8"', result)
 
-    def test_repeated_injection_is_not_silently_deduplicated(self) -> None:
+    def test_repeated_injection_is_idempotent(self) -> None:
         first = inject_subs(WITHOUT_GROUP, "key", ["zh-Hans"])
-        self.assertEqual(
-            inject_subs(first, "key", ["zh-Hans"]).count('NAME="简体中文"'), 2
+        self.assertEqual(inject_subs(first, "key", ["zh-Hans"]), first)
+
+    def test_official_cmn_tracks_block_our_duplicates(self) -> None:
+        master = (
+            "#EXTM3U\n#EXT-X-VERSION:6\n"
+            '#EXT-X-MEDIA:TYPE=SUBTITLES,GROUP-ID="subs",NAME="中文（简体）",'
+            'LANGUAGE="cmn-Hans",URI="cmn-hans.m3u8"\n'
+            '#EXT-X-MEDIA:TYPE=SUBTITLES,GROUP-ID="subs",NAME="中文（繁體）",'
+            'LANGUAGE="cmn-Hant",URI="cmn-hant.m3u8"\n'
+            '#EXT-X-STREAM-INF:BANDWIDTH=5000000,SUBTITLES="subs"\nhigh.m3u8\n'
         )
+        self.assertEqual(inject_subs(master, "key", ["zh-Hans", "zh-Hant"]), master)
+
+    def test_official_simplified_only_still_gets_traditional(self) -> None:
+        master = (
+            "#EXTM3U\n#EXT-X-VERSION:6\n"
+            '#EXT-X-MEDIA:TYPE=SUBTITLES,GROUP-ID="subs",NAME="中文（简体）",'
+            'LANGUAGE="cmn-Hans",URI="cmn-hans.m3u8"\n'
+            '#EXT-X-STREAM-INF:BANDWIDTH=5000000,SUBTITLES="subs"\nhigh.m3u8\n'
+        )
+        result = inject_subs(master, "key", ["zh-Hans", "zh-Hant"])
+        self.assertNotIn('LANGUAGE="zh-Hans"', result)
+        self.assertEqual(result.count('LANGUAGE="zh-Hant"'), 1)
+
+    def test_cantonese_traditional_does_not_block_mandarin(self) -> None:
+        master = (
+            "#EXTM3U\n#EXT-X-VERSION:6\n"
+            '#EXT-X-MEDIA:TYPE=SUBTITLES,GROUP-ID="subs",NAME="粵語",'
+            'LANGUAGE="yue-Hant",URI="yue.m3u8"\n'
+            '#EXT-X-STREAM-INF:BANDWIDTH=5000000,SUBTITLES="subs"\nhigh.m3u8\n'
+        )
+        result = inject_subs(master, "key", ["zh-Hans", "zh-Hant"])
+        self.assertIn('LANGUAGE="zh-Hans"', result)
+        self.assertIn('LANGUAGE="zh-Hant"', result)
+
+    def test_present_zh_normalizes_apple_spellings(self) -> None:
+        master = (
+            "#EXTM3U\n"
+            '#EXT-X-MEDIA:TYPE=SUBTITLES,GROUP-ID="subs",LANGUAGE="cmn-Hans",'
+            'NAME="a",URI="a"\n'
+            '#EXT-X-MEDIA:TYPE=SUBTITLES,GROUP-ID="subs",LANGUAGE="zh-TW",'
+            'NAME="b",URI="b"\n'
+            '#EXT-X-MEDIA:TYPE=SUBTITLES,GROUP-ID="subs",LANGUAGE="yue-Hant",'
+            'NAME="c",URI="c"\n'
+            '#EXT-X-MEDIA:TYPE=SUBTITLES,GROUP-ID="other",LANGUAGE="zh-CN",'
+            'NAME="d",URI="d"\n'
+        )
+        self.assertEqual(present_zh(master), {"zh-Hans", "zh-Hant"})
+        self.assertEqual(present_zh(master, "subs"), {"zh-Hans", "zh-Hant"})
+        self.assertEqual(present_zh(master, "other"), {"zh-Hans"})
 
 
 class PlaylistTests(unittest.TestCase):

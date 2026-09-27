@@ -141,8 +141,18 @@ class SubHD:
         return url
 
 
-def _pick_score(entry: SearchEntry, year: int | str | None) -> int:
-    """Keep the original weights and release-name checks."""
+def _pick_score(
+    entry: SearchEntry,
+    year: int | str | None,
+    season: int | None = None,
+    episode: int | None = None,
+) -> int:
+    """Keep the original weights and release-name checks.
+
+    Series releases get a large bonus for the exact SxxEyy tag and a penalty
+    for a tag that names a different episode, so a season page cannot pick a
+    neighbour episode by accident.
+    """
     score = 0
     if "zh-Hans" in entry["langs"]:
         score += 4
@@ -154,6 +164,18 @@ def _pick_score(entry: SearchEntry, year: int | str | None) -> int:
         score += 2
     if re.search(r"blu-?ray|bdrip|web-?dl|webrip", entry["release"], re.IGNORECASE):
         score += 1
+    if season and episode:
+        release = entry["release"].lower()
+        wanted = rf"s0*{season}e0*{episode}(?!\d)"
+        if re.search(wanted, release):
+            score += 6
+        else:
+            other = re.search(r"s(\d{1,2})e(\d{1,2})(?!\d)", release)
+            if other and (int(other.group(1)), int(other.group(2))) != (
+                season,
+                episode,
+            ):
+                score -= 8
     return score
 
 
@@ -236,14 +258,29 @@ class SubHDFetcher:
         year: int | str | None,
         umc: str,
         log: Callable[[str], None] = print,
+        *,
+        season: int | None = None,
+        episode: int | None = None,
     ) -> RegistryEntry:
         with self._lock:
             existing = self.registry.load().get(umc)
-            if existing and existing.get("langs"):
+            if existing is not None:
+                if season and episode:
+                    slot_match = (
+                        existing.get("season") == season
+                        and existing.get("episode") == episode
+                    )
+                else:
+                    slot_match = not existing.get("episode")
+            else:
+                slot_match = False
+            if existing and existing.get("langs") and slot_match:
                 return existing
             key = re.sub(r"[^A-Za-z0-9]+", "", title.lower())[:24] or "movie"
             if year:
                 key += str(year)
+            if season and episode:
+                key += f"s{season:02d}e{episode:02d}"
             have = [
                 lang
                 for lang in LANGUAGES
@@ -251,12 +288,23 @@ class SubHDFetcher:
             ]
             if not have:
                 client = self.client_factory()
-                entries = client.search(f"{title} {year}" if year else title)
-                if not entries:
-                    entries = client.search(title)
+                queries = []
+                if season and episode:
+                    queries.append(f"{title} S{season:02d}E{episode:02d}")
+                if year:
+                    queries.append(f"{title} {year}")
+                queries.append(title)
+                entries: list[SearchEntry] = []
+                for query in queries:
+                    entries = client.search(query)
+                    if entries:
+                        break
                 if not entries:
                     raise RuntimeError(f"no subhd results for {title}")
-                entries.sort(key=lambda entry: _pick_score(entry, year), reverse=True)
+                entries.sort(
+                    key=lambda entry: _pick_score(entry, year, season, episode),
+                    reverse=True,
+                )
                 best = entries[0]
                 log(f"subhd pick: {best['sid']} {best['release'][:60]} {best['langs']}")
                 url = client.get_file_url(best["sid"])
@@ -273,10 +321,17 @@ class SubHDFetcher:
                 )
             if not have:
                 raise RuntimeError("no zh subtitle track extracted")
-            return self.registry.update(
-                umc,
-                {"key": key, "title": title, "year": year, "langs": have},
-            )
+            entry: RegistryEntry = {
+                "key": key,
+                "title": title,
+                "year": year,
+                "langs": have,
+            }
+            if season is not None:
+                entry["season"] = season
+            if episode is not None:
+                entry["episode"] = episode
+            return self.registry.update(umc, entry)
 
 
 def main(argv: Sequence[str] | None = None) -> None:

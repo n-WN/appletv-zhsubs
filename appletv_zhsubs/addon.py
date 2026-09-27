@@ -8,6 +8,7 @@ import subprocess
 import threading
 import time
 from dataclasses import dataclass
+from datetime import UTC, datetime
 from http.client import HTTPException
 from pathlib import Path
 
@@ -27,9 +28,85 @@ from .config import (
     UTS_HOST,
 )
 from .fetcher import SubHDFetcher
-from .hls import inject_subs
+from .hls import inject_subs, present_zh
 from .log import AuditLogger
 from .registry import Registry, RegistryEntry
+
+
+@dataclass(frozen=True, slots=True)
+class TitleMeta:
+    """Identify one playable; season/episode are set for series only."""
+
+    title: str
+    year: int | None
+    season: int | None = None
+    episode: int | None = None
+
+
+def _year_from_ms(value: object) -> int | None:
+    if isinstance(value, int | float) and value > 0:
+        return datetime.fromtimestamp(value / 1000, tz=UTC).year
+    return None
+
+
+def _episode_meta(node: dict) -> TitleMeta | None:
+    """Read the showTitle/season/episode shape used by episode playables."""
+    title = node.get("showTitle") or node.get("title")
+    season, episode = node.get("seasonNumber"), node.get("episodeNumber")
+    if not (isinstance(title, str) and 1 < len(title) < 120):
+        return None
+    if not (isinstance(season, int) and isinstance(episode, int)):
+        return None
+    year = _year_from_ms(node.get("releaseDate"))
+    return TitleMeta(title=title, year=year, season=season, episode=episode)
+
+
+def _extract_meta(data: object) -> TitleMeta | None:
+    """Extract title metadata from a uts-api movie or show response.
+
+    Show pages put the playing episode under `smartEpisode` (and every
+    playable's `canonicalMetadata`); movies keep title/year on `content`.
+    The legacy deep search stays as the last resort for older shapes.
+    """
+    if not isinstance(data, dict):
+        return None
+    root = data.get("data")
+    if not isinstance(root, dict):
+        root = data
+    smart = root.get("smartEpisode")
+    if isinstance(smart, dict):
+        meta = _episode_meta(smart)
+        if meta:
+            return meta
+    playables = root.get("playables")
+    if isinstance(playables, dict):
+        for playable in playables.values():
+            if isinstance(playable, dict):
+                canonical = playable.get("canonicalMetadata")
+                if isinstance(canonical, dict):
+                    meta = _episode_meta(canonical)
+                    if meta:
+                        return meta
+    content = root.get("content")
+    if isinstance(content, dict):
+        title = content.get("title")
+        if isinstance(title, str) and 2 < len(title) < 120:
+            year = (
+                _year_from_ms(content.get("releaseDate"))
+                or content.get("releaseYear")
+                or content.get("year")
+            )
+            if isinstance(year, str) and year[:4].isdigit():
+                year = int(year[:4])
+            if isinstance(year, int) or content.get("type") in ("Movie", "Show"):
+                return TitleMeta(
+                    title=title, year=year if isinstance(year, int) else None
+                )
+    legacy = _deep_find_meta(data)
+    if legacy:
+        title, year = legacy
+        return TitleMeta(title=title, year=year)
+    return None
 
 
 def _deep_find_meta(node: object) -> tuple[str, int | None] | None:
@@ -65,6 +142,19 @@ class CurrentMovie:
     @classmethod
     def from_entry(cls, umc: str, entry: RegistryEntry) -> CurrentMovie:
         return cls(umc, entry["key"], tuple(entry.get("langs", [])))
+
+
+def _entry_matches(entry: RegistryEntry, meta: TitleMeta | None) -> bool:
+    """Trust a registry hit only when it names the same title slot.
+
+    Movie UMCs are title-unique, so an entry without episode data is always
+    safe to reuse. A show UMC covers every episode, so the stored season and
+    episode must equal the ones the page is playing; when the episode is
+    unknown (meta missing) an episode entry is never safe to reuse.
+    """
+    if meta is None or meta.episode is None:
+        return not entry.get("episode")
+    return entry.get("season") == meta.season and entry.get("episode") == meta.episode
 
 
 class AppleTVZhSubs:
@@ -147,7 +237,8 @@ class AppleTVZhSubs:
 
     def _on_movie_meta(self, flow: http.HTTPFlow, umc: str) -> None:
         entry = self.registry.load().get(umc)
-        if entry is not None:
+        if entry is not None and entry.get("langs") and not entry.get("episode"):
+            # Movie entries are UMC-unique: reuse them without reading the body.
             with self.lock:
                 self.current = CurrentMovie.from_entry(umc, entry)
             self.logger.emit(
@@ -158,28 +249,51 @@ class AppleTVZhSubs:
                 src="registry",
             )
             return
-        if flow.response is None or flow.response.status_code != 200:
+        meta: TitleMeta | None = None
+        if flow.response is not None and flow.response.status_code == 200:
+            try:
+                meta = _extract_meta(json.loads(flow.response.raw_content or b"{}"))
+            except ValueError:
+                meta = None
+        if entry is not None and entry.get("langs") and _entry_matches(entry, meta):
+            with self.lock:
+                self.current = CurrentMovie.from_entry(umc, entry)
+            self.logger.emit(
+                "movie",
+                umc=umc,
+                key=entry["key"],
+                langs=entry.get("langs", []),
+                src="registry",
+            )
             return
-        meta = None
-        try:
-            meta = _deep_find_meta(json.loads(flow.response.raw_content or b"{}"))
-        except ValueError:
-            pass
-        if not meta:
+        # A new or unknown title must never inherit the previous title's
+        # tracks; clear first, then refill only when this title is ready.
+        with self.lock:
+            self.current = None
+        if meta is None:
             self.logger.emit("movie", umc=umc, src="unparsed")
             return
-        title, year = meta
-        self.logger.emit("movie", umc=umc, title=title, year=year, src="parsed")
+        self.logger.emit(
+            "movie",
+            umc=umc,
+            title=meta.title,
+            year=meta.year,
+            season=meta.season,
+            episode=meta.episode,
+            src="parsed",
+        )
         threading.Thread(
-            target=self._fetch_movie, args=(title, year, umc), daemon=True
+            target=self._fetch_movie, args=(meta, umc), daemon=True
         ).start()
 
-    def _fetch_movie(self, title: str, year: int | None, umc: str) -> None:
+    def _fetch_movie(self, meta: TitleMeta, umc: str) -> None:
         try:
             entry = self.fetcher.fetch_for(
-                title,
-                year,
+                meta.title,
+                meta.year,
                 umc,
+                season=meta.season,
+                episode=meta.episode,
                 log=lambda message: self.logger.emit("fetch", msg=message),
             )
             with self.lock:
@@ -223,6 +337,8 @@ class AppleTVZhSubs:
             pass
         with self.lock:
             current = self.current
+        if current is None and path == SELFTEST_PATH:
+            current = self._selftest_movie()
         if current is None or not current.key:
             self.logger.emit("inject_skip", why="no-current-movie", path=path[:80])
             return
@@ -236,10 +352,17 @@ class AppleTVZhSubs:
             self.logger.emit(
                 "inject",
                 key=current.key,
-                langs=list(current.langs),
+                langs=sorted(set(current.langs) - present_zh(text)),
                 path=path[:80],
                 status=flow.response.status_code,
             )
+
+    def _selftest_movie(self) -> CurrentMovie | None:
+        """Let the self-test exercise injection even before any real playback."""
+        for entry in reversed(list(self.registry.load().values())):
+            if entry.get("langs"):
+                return CurrentMovie("umc.selftest", entry["key"], tuple(entry["langs"]))
+        return None
 
 
 addons = [AppleTVZhSubs()]

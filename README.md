@@ -18,6 +18,14 @@ One Mac (or any always-on host) on the LAN serves every device.
 - **Native picker entries.** Injects `zh-Hans` and `zh-Hant` renditions
   (`EXT-X-MEDIA`) into Apple TV HLS masters, so they show up in the stock
   subtitle menu next to the official tracks.
+- **Official tracks win.** Injection is idempotent and skips any language the
+  master already carries — Apple's own `cmn-Hans`/`cmn-Hant` renditions
+  included — so you never see duplicate or conflicting menu entries.
+- **Series aware.** Episode pages are read from `smartEpisode`
+  (`showTitle` + `seasonNumber` + `episodeNumber`), the SubHD search leads
+  with the exact `SxxEyy` tag, and a release naming a different episode is
+  penalized. One title's tracks are never reused for another title or
+  episode.
 - **Automatic subtitle acquisition.** On the first playback of a title, the
   addon searches SubHD, ranks releases against the title year, downloads the
   archive, extracts it, and converts SRT/ASS to WebVTT with `ffmpeg`. Results
@@ -27,7 +35,7 @@ One Mac (or any always-on host) on the LAN serves every device.
 - **Region pinning.** Rewrites the configuration API response so the player
   accepts the injected tracks (storefront `143464`, SG, by default).
 - **Observable.** Audit log for every rewrite, `/inj-selftest/` endpoint to
-  verify injection end to end, and 93 unit tests for the pipeline.
+  verify injection end to end, and 106 unit tests for the pipeline.
 
 ## How it works
 
@@ -79,7 +87,7 @@ leaf certificate chains to the same mitmproxy CA the device already trusts).
 | `appletv_zhsubs/vtt.py` | WebVTT parsing, duration, cue shifting |
 | `appletv_zhsubs/registry.py` | UMC → subtitle-set registry with offsets |
 | `appletv_zhsubs/config.py` | All ports, paths, and fixed values in one place |
-| `tests/` | 93 unit tests, no network, no subprocess |
+| `tests/` | 106 unit tests, no network, no subprocess |
 
 ## Deployment
 
@@ -201,7 +209,7 @@ python3 -m appletv_zhsubs.fetcher "Title" 2013 umc.cmc.xxxx
 ## Development
 
 ```sh
-python3 -m unittest discover -s tests   # 93 tests, offline, loopback only
+python3 -m unittest discover -s tests   # 106 tests, offline, loopback only
 ruff check .
 ```
 

@@ -19,7 +19,13 @@ from tests.support import (
 
 install_mitmproxy_stub()
 
-from appletv_zhsubs.addon import AppleTVZhSubs, CurrentMovie, _deep_find_meta
+from appletv_zhsubs.addon import (
+    AppleTVZhSubs,
+    CurrentMovie,
+    TitleMeta,
+    _deep_find_meta,
+    _extract_meta,
+)
 from appletv_zhsubs.config import (
     CONFIGURATION_PATH,
     PLAYEDGE_HOST,
@@ -144,19 +150,23 @@ class AddonTests(ScratchTestCase):
                 )
         self.fetcher.fetch_for.assert_not_called()
 
-    def test_registry_miss_does_not_parse_non200_body(self) -> None:
+    def test_registry_miss_non200_clears_current_without_parsing(self) -> None:
         current = CurrentMovie("umc.old", "old", ("zh-Hant",))
-        self.addon.current = current
         with patch(
             "appletv_zhsubs.addon.json.loads",
             side_effect=AssertionError("must not parse"),
         ):
             for status in (201, 304, 403, 500):
+                self.addon.current = current
                 flow = self.flow("/uts/v3/movies/umc.movie", status=status)
                 self.addon.request(flow)
                 self.addon.response(flow)
-        self.assertIs(self.addon.current, current)
-        self.logger.emit.assert_not_called()
+                # A new title must never inherit the previous title's tracks,
+                # even when its own metadata request fails.
+                self.assertIsNone(self.addon.current)
+                self.logger.emit.assert_called_with(
+                    "movie", umc="umc.movie", src="unparsed"
+                )
 
     def test_response_without_request_metadata_is_ignored(self) -> None:
         self.addon.response(self.flow("/uts/v3/movies/umc.movie"))
@@ -197,7 +207,7 @@ class AddonTests(ScratchTestCase):
             self.addon.response(flow)
         thread.assert_called_once_with(
             target=self.addon._fetch_movie,
-            args=("Movie", 2013, "umc.movie"),
+            args=(TitleMeta("Movie", 2013), "umc.movie"),
             daemon=True,
         )
         thread.return_value.start.assert_called_once()
@@ -206,6 +216,8 @@ class AddonTests(ScratchTestCase):
             umc="umc.movie",
             title="Movie",
             year=2013,
+            season=None,
+            episode=None,
             src="parsed",
         )
 
@@ -219,12 +231,141 @@ class AddonTests(ScratchTestCase):
             )
         self.fetcher.fetch_for.assert_not_called()
 
+    def test_new_unparsed_title_clears_stale_current_and_skips_injection(self) -> None:
+        """Regression: an unparsed show must not keep the previous movie's subs."""
+        self.addon.current = CurrentMovie("umc.movie", "wolf2013", ("zh-Hans",))
+        flow = self.flow("/uts/v3/shows/umc.show", body=b"{}")
+        self.addon.request(flow)
+        self.addon.response(flow)
+        self.assertIsNone(self.addon.current)
+        self.logger.emit.assert_called_with("movie", umc="umc.show", src="unparsed")
+
+        master = self.flow(
+            "/WebObjects/MZPlayLocal.woa/hls/subscription/playlist.m3u8",
+            host=PLAYEDGE_HOST,
+            body=SELFTEST_MASTER.encode(),
+        )
+        self.addon.request(master)
+        original = master.response.text
+        self.addon.response(master)
+        self.assertEqual(master.response.text, original)
+        self.logger.emit.assert_called_with(
+            "inject_skip",
+            why="no-current-movie",
+            path="/WebObjects/MZPlayLocal.woa/hls/subscription/playlist.m3u8",
+        )
+
+    def test_extract_meta_reads_smart_episode(self) -> None:
+        body = {
+            "data": {
+                "content": {"id": "umc.show", "title": "Hijack", "type": "Show"},
+                "smartEpisode": {
+                    "showTitle": "Hijack",
+                    "title": "Final Call",
+                    "seasonNumber": 1,
+                    "episodeNumber": 1,
+                    "releaseDate": 1687910400000,
+                },
+            }
+        }
+        self.assertEqual(
+            _extract_meta(body), TitleMeta("Hijack", 2023, season=1, episode=1)
+        )
+
+    def test_extract_meta_reads_playable_canonical_metadata(self) -> None:
+        body = {
+            "data": {
+                "playables": {
+                    "tvs.sbd.4000:X": {
+                        "canonicalMetadata": {
+                            "showTitle": "Hijack",
+                            "seasonNumber": 2,
+                            "episodeNumber": 3,
+                            "releaseDate": 1768348800000,
+                        }
+                    }
+                }
+            }
+        }
+        self.assertEqual(
+            _extract_meta(body), TitleMeta("Hijack", 2026, season=2, episode=3)
+        )
+
+    def test_episode_registry_hit_requires_the_same_slot(self) -> None:
+        self.registry.save(
+            {
+                "umc.show": {
+                    "key": "hijack2023s01e01",
+                    "langs": ["zh-Hans"],
+                    "season": 1,
+                    "episode": 1,
+                }
+            }
+        )
+        body = json.dumps(
+            {
+                "data": {
+                    "smartEpisode": {
+                        "showTitle": "Hijack",
+                        "seasonNumber": 1,
+                        "episodeNumber": 2,
+                        "releaseDate": 1687910400000,
+                    }
+                }
+            }
+        ).encode()
+        # A different episode of the same show must refetch, not reuse S01E01.
+        self.addon.current = CurrentMovie("umc.old", "old", ("zh-Hans",))
+        flow = self.flow("/uts/v3/shows/umc.show", body=body)
+        self.addon.request(flow)
+        with patch("appletv_zhsubs.addon.threading.Thread") as thread:
+            self.addon.response(flow)
+        self.assertIsNone(self.addon.current)
+        thread.assert_called_once_with(
+            target=self.addon._fetch_movie,
+            args=(TitleMeta("Hijack", 2023, season=1, episode=2), "umc.show"),
+            daemon=True,
+        )
+
+        # The stored slot matches: reuse it without a fetch.
+        same = json.dumps(
+            {
+                "data": {
+                    "smartEpisode": {
+                        "showTitle": "Hijack",
+                        "seasonNumber": 1,
+                        "episodeNumber": 1,
+                        "releaseDate": 1687910400000,
+                    }
+                }
+            }
+        ).encode()
+        flow = self.flow("/uts/v3/shows/umc.show", body=same)
+        self.addon.request(flow)
+        self.addon.response(flow)
+        self.assertEqual(
+            self.addon.current,
+            CurrentMovie("umc.show", "hijack2023s01e01", ("zh-Hans",)),
+        )
+
+    def test_selftest_falls_back_to_a_registry_entry(self) -> None:
+        self.registry.save(
+            {"umc.movie": {"key": "wolf2013", "langs": ["zh-Hans", "zh-Hant"]}}
+        )
+        self.addon.current = None
+        flow = self.flow(SELFTEST_PATH, host=PLAYEDGE_HOST)
+        flow.response.text = SELFTEST_MASTER
+        self.addon.request(flow)
+        self.addon.response(flow)
+        self.assertIn("/s/wolf2013/zh-Hans.m3u8", flow.response.text)
+        self.assertIn("/s/wolf2013/zh-Hant.m3u8", flow.response.text)
+
     def test_fetch_success_sets_current_and_keeps_audit_fields(self) -> None:
         self.fetcher.fetch_for.return_value = {
             "key": "movie",
             "langs": ["zh-Hans", "zh-Hant"],
         }
-        self.addon._fetch_movie("Movie", 2013, "umc.movie")
+        self.addon._fetch_movie(TitleMeta("Movie", 2013), "umc.movie")
         self.assertEqual(
             self.addon.current,
             CurrentMovie("umc.movie", "movie", ("zh-Hans", "zh-Hant")),
@@ -250,7 +391,7 @@ class AddonTests(ScratchTestCase):
             HTTPException("HTTP"),
         ):
             self.fetcher.fetch_for.side_effect = failure
-            self.addon._fetch_movie("Movie", 2013, "umc.movie")
+            self.addon._fetch_movie(TitleMeta("Movie", 2013), "umc.movie")
             self.assertIs(self.addon.current, current)
             self.logger.emit.assert_called_with(
                 "fetch_fail", umc="umc.movie", err=str(failure)

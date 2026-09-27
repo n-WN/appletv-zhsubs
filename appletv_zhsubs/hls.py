@@ -6,13 +6,51 @@ from collections.abc import Collection
 from .config import LANGUAGE_NAMES, LANGUAGES, SUB_BASE
 
 
+def _norm_zh(language: str) -> str | None:
+    """Map a LANGUAGE value to our track ids; Cantonese (yue) stays separate."""
+    low = language.strip().lower()
+    if low.startswith("yue"):
+        return None
+    if "hans" in low or low in {"zh-cn", "zh-sg", "zh-chs"}:
+        return "zh-Hans"
+    if "hant" in low or low in {"zh-tw", "zh-hk", "zh-cht"}:
+        return "zh-Hant"
+    return None
+
+
+def present_zh(master_text: str, group_id: str | None = None) -> set[str]:
+    """Return the normalized Chinese languages the subtitle group already has.
+
+    Apple marks Mandarin tracks as cmn-Hans/cmn-Hant, so a plain "zh" search
+    misses them; every Hans/Hant spelling counts here.
+    """
+    found: set[str] = set()
+    for line in master_text.splitlines():
+        if not line.startswith("#EXT-X-MEDIA:") or "TYPE=SUBTITLES" not in line:
+            continue
+        if group_id is not None and f'GROUP-ID="{group_id}"' not in line:
+            continue
+        match = re.search(r'LANGUAGE="([^"]+)"', line)
+        if match:
+            norm = _norm_zh(match.group(1))
+            if norm:
+                found.add(norm)
+    return found
+
+
 def inject_subs(
     master_text: str,
     key: str,
     langs: Collection[str],
     sub_base: str = SUB_BASE,
 ) -> str:
-    """Add Chinese tracks to the first variant's subtitle group, as before."""
+    """Add Chinese tracks to the first variant's subtitle group, as before.
+
+    Idempotent, and it never duplicates a language the master already carries
+    (official cmn-Hans/cmn-Hant tracks included).
+    """
+    if sub_base in master_text:
+        return master_text
     lines = master_text.splitlines()
     group_id: str | None = None
     for line in lines:
@@ -21,6 +59,7 @@ def inject_subs(
             if match:
                 group_id = match.group(1)
             break
+    present = present_zh(master_text, group_id)
     if group_id is None:
         group_id = "inj-subs"
         lines = [
@@ -34,7 +73,7 @@ def inject_subs(
         f'NAME="{LANGUAGE_NAMES[lang]}",LANGUAGE="{lang}",AUTOSELECT=YES,'
         f'DEFAULT=NO,FORCED=NO,URI="{sub_base}/{key}/{lang}.m3u8"'
         for lang in LANGUAGES
-        if lang in langs
+        if lang in langs and lang not in present
     ]
     if not renditions:
         return master_text

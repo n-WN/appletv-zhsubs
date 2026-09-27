@@ -48,7 +48,8 @@ def original_function(filename: str, name: str) -> Callable[..., object] | None:
         "SUB_BASE": "https://127.0.0.1:17897/s",
     }
     exec(  # noqa: S102 -- intentional: run the legacy function in an isolated namespace for byte-comparison tests
-        compile(isolated, str(path), "exec"), namespace)
+        compile(isolated, str(path), "exec"), namespace
+    )
     return cast(Callable[..., object], namespace[name])
 
 
