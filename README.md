@@ -15,9 +15,18 @@ One Mac (or any always-on host) on the LAN serves every device.
 
 ## Features
 
-- **Native picker entries.** Injects `zh-Hans` and `zh-Hant` renditions
-  (`EXT-X-MEDIA`) into Apple TV HLS masters, so they show up in the stock
-  subtitle menu next to the official tracks.
+- **Native picker entries, clearly marked.** Injects `zh-Hans` and `zh-Hant`
+  renditions (`EXT-X-MEDIA`) into Apple TV HLS masters, so they show up in
+  the stock subtitle menu next to the official tracks. Apple players ignore
+  the `NAME` attribute and render the system-localized name of the
+  `LANGUAGE` tag instead (verified against AVFoundation), so provenance
+  rides in the tag itself: injected tracks carry `zh-Hans-x-comm` /
+  `zh-Hant-x-comm`, which the menu shows as "Chinese, Simplified
+  (Private-Use: comm)" — always distinguishable from an official
+  `cmn-Hans` track. `NAME` still carries （社区）/（社區） for players
+  that honor it. Note: the effect of a private-use subtag on the player's
+  *automatic* preferred-language matching has not been verified; manual
+  selection is unaffected.
 - **Official tracks win.** Injection is idempotent and skips any language the
   master already carries — Apple's own `cmn-Hans`/`cmn-Hant` renditions
   included — so you never see duplicate or conflicting menu entries.
